@@ -1,17 +1,27 @@
 -- Config
 local config = {
-    WindowSize = Vector2.new(350, 250),
     AutoFarmBonds = true,
     AutoCollectBonds = true,
-    TeleportToBonds = true,
-    CloneItems = true,
-    ElectrocutionerFix = true,
+    TeleportDelay = 0.5,
     GodMode = false
 }
 
--- UI Library (with min/max/close buttons)
-local library = loadstring(game:HttpGet("https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main/Library.lua"))()
-local window = library:CreateWindow("Dead Rails Farmer", config.WindowSize)
+-- UI Library (используем более стабильную версию)
+local success, library = pcall(function()
+    return loadstring(game:HttpGet("https://raw.githubusercontent.com/wally-rblx/LinoriaLib/main/Library.lua"))()
+end)
+
+if not success then
+    game:GetService("StarterGui"):SetCore("SendNotification", {
+        Title = "Ошибка",
+        Text = "Не удалось загрузить библиотеку UI",
+        Duration = 5
+    })
+    return
+end
+
+-- Create window
+local window = library:CreateWindow("Dead Rails Farmer", Vector2.new(350, 250))
 window:SetDraggable(true)
 
 -- Variables
@@ -29,104 +39,89 @@ local function updateBondLocations()
     return #bondLocations > 0
 end
 
-local function teleportToNextBond()
-    if currentBondIndex > #bondLocations then
-        currentBondIndex = 1
-        if not updateBondLocations() then
-            print("Облигации не найдены!")
-            return false
-        end
-    end
-    
+local function teleportToPosition(position)
     local char = game.Players.LocalPlayer.Character
-    if char then
-        local humanoidRootPart = char:FindFirstChild("HumanoidRootPart")
-        if humanoidRootPart then
-            humanoidRootPart.CFrame = CFrame.new(bondLocations[currentBondIndex])
-            currentBondIndex = currentBondIndex + 1
-            return true
-        end
+    if char and char:FindFirstChild("HumanoidRootPart") then
+        char.HumanoidRootPart.CFrame = CFrame.new(position + Vector3.new(0, 3, 0))
+        return true
     end
     return false
 end
 
 local function autoCollectBonds()
     while config.AutoCollectBonds and config.AutoFarmBonds do
-        if teleportToNextBond() then
-            -- Имитация сбора (можно добавить firetouchinterest при необходимости)
-            task.wait(0.5)
+        if currentBondIndex > #bondLocations then
+            if not updateBondLocations() or #bondLocations == 0 then
+                task.wait(2)
+                currentBondIndex = 1
+                continue
+            end
+            currentBondIndex = 1
+        end
+        
+        if teleportToPosition(bondLocations[currentBondIndex]) then
+            currentBondIndex = currentBondIndex + 1
+            task.wait(config.TeleportDelay)
         else
-            task.wait(2) -- Ждем, если облигаций нет
+            task.wait(1)
         end
-    end
-end
-
-local function farmBonds()
-    while config.AutoFarmBonds do
-        if config.AutoCollectBonds then
-            autoCollectBonds()
-        elseif config.TeleportToBonds then
-            updateBondLocations()
-            teleportToNextBond()
-        end
-
-        if config.CloneItems then
-            for _, item in ipairs(game:GetService("ReplicatedStorage"):GetDescendants()) do
-                if item:IsA("Tool") then
-                    item:Clone().Parent = game.Players.LocalPlayer.Backpack
-                end
-            end
-        end
-
-        if config.ElectrocutionerFix then
-            local teslaLab = workspace:FindFirstChild("Tesla Laboratory")
-            if teslaLab then
-                local electrocutioner = teslaLab:FindFirstChild("Electrocutioner")
-                if electrocutioner then
-                    firetouchinterest(game.Players.LocalPlayer.Character.HumanoidRootPart, electrocutioner, 0)
-                    task.wait(1)
-                end
-            end
-        end
-        task.wait(0.5)
     end
 end
 
 -- GodMode
 local function toggleGodMode()
-    if config.GodMode then
-        game.Players.LocalPlayer.Character.Humanoid.MaxHealth = math.huge
-        game.Players.LocalPlayer.Character.Humanoid.Health = math.huge
-    else
-        game.Players.LocalPlayer.Character.Humanoid.MaxHealth = 100
-        game.Players.LocalPlayer.Character.Humanoid.Health = 100
+    local humanoid = game.Players.LocalPlayer.Character:FindFirstChild("Humanoid")
+    if humanoid then
+        if config.GodMode then
+            humanoid.MaxHealth = math.huge
+            humanoid.Health = math.huge
+        else
+            humanoid.MaxHealth = 100
+            humanoid.Health = 100
+        end
     end
 end
 
 -- UI Elements
-window:AddToggle("AutoFarmBonds", {Text = "Автофарм облигаций", Default = true}):OnChanged(function(value)
-    config.AutoFarmBonds = value
-    if value then
-        farmBonds()
+window:AddToggle("AutoFarmBonds", {
+    Text = "Автофарм облигаций",
+    Default = config.AutoFarmBonds,
+    Callback = function(value)
+        config.AutoFarmBonds = value
+        if value then
+            coroutine.wrap(autoCollectBonds)()
+        end
     end
-end)
+})
 
-window:AddToggle("AutoCollectBonds", {Text = "Автосбор облигаций", Default = true}):OnChanged(function(value)
-    config.AutoCollectBonds = value
-end)
+window:AddToggle("AutoCollectBonds", {
+    Text = "Автосбор облигаций",
+    Default = config.AutoCollectBonds,
+    Callback = function(value)
+        config.AutoCollectBonds = value
+    end
+})
 
-window:AddToggle("GodMode", {Text = "Бессмертие", Default = false}):OnChanged(function(value)
-    config.GodMode = value
-    toggleGodMode()
-end)
+window:AddToggle("GodMode", {
+    Text = "Бессмертие",
+    Default = config.GodMode,
+    Callback = function(value)
+        config.GodMode = value
+        toggleGodMode()
+    end
+})
 
 window:AddButton("Обновить позиции", function()
     updateBondLocations()
-    print("Найдено облигаций: " .. #bondLocations)
+    library:Notify("Найдено облигаций: " .. #bondLocations)
 end)
 
+-- Initialize
 library:Init()
-
--- Initial scan
 updateBondLocations()
-print("Скрипт активирован. Найдено облигаций: " .. #bondLocations)
+library:Notify("Скрипт активирован. Найдено облигаций: " .. #bondLocations)
+
+-- Auto-start if enabled
+if config.AutoFarmBonds then
+    coroutine.wrap(autoCollectBonds)()
+end
